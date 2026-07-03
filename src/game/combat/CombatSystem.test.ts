@@ -194,6 +194,7 @@ describe('CombatSystem', () => {
       resistance: 'weak',
       critical: false,
       exploitedWeakness: true,
+      weaknessNegated: false,
       bonusTurn: true,
       knockedDown: true,
     });
@@ -206,6 +207,7 @@ describe('CombatSystem', () => {
       resistance: 'normal',
       critical: false,
       exploitedWeakness: false,
+      weaknessNegated: false,
       bonusTurn: false,
       knockedDown: false,
     });
@@ -249,6 +251,28 @@ describe('CombatSystem', () => {
     combatSystem.update(battleState, 0);
 
     expect(target.isGuarding).toBe(false);
+  });
+
+  it('ガード: negates an elemental weakness entirely (no bonus damage, no down, no 1 MORE)', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.1) // accuracy roll
+      .mockReturnValueOnce(0.5) // randomFactor -> 1.0
+      .mockReturnValueOnce(0.9); // crit roll -> no crit
+
+    const attacker = createEnemy({});
+    const target = createEnemy({ fire: 'weak' }, { id: 'enemy2' });
+    combatSystem.guard(target);
+
+    const result = combatSystem.performAction(attacker, target, fireballSkill);
+
+    // baseDamage 9 * randomFactor(1.0) x guard(0.5) only -> floor 4 (no x1.5 weak bonus)
+    expect(result.resistance).toBe('weak');
+    expect(result.weaknessNegated).toBe(true);
+    expect(result.exploitedWeakness).toBe(false);
+    expect(result.bonusTurn).toBe(false);
+    expect(result.knockedDown).toBe(false);
+    expect(result.damage).toBe(4);
+    expect(target.battleStatus).toHaveLength(0);
   });
 
   it('アナライズ: categorizes an enemy\'s elemental resistances and marks it analyzed', () => {

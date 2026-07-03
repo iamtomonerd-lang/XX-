@@ -33,6 +33,8 @@ export interface ActionResult {
   resistance: Resistance;
   critical: boolean;
   exploitedWeakness: boolean;
+  /** True when the target was guarding and that guard cancelled an elemental weakness. */
+  weaknessNegated: boolean;
   /** True when the attacker earned an extra ("1 MORE") action this round. */
   bonusTurn: boolean;
   knockedDown: boolean;
@@ -45,6 +47,7 @@ const MISS_RESULT: ActionResult = {
   resistance: 'normal',
   critical: false,
   exploitedWeakness: false,
+  weaknessNegated: false,
   bonusTurn: false,
   knockedDown: false,
 };
@@ -170,7 +173,9 @@ export class CombatSystem {
     const randomFactor = 0.85 + Math.random() * 0.3; // 85-115%
     const critChance = 0.05 + attacker.stats.luck * 0.002;
     const critical = skill.type !== 'support' && Math.random() < critChance;
-    const exploitedWeakness = resistance === 'weak';
+    // Guarding negates the weakness bonus (and the down it would otherwise cause).
+    const weaknessNegated = resistance === 'weak' && !!target.isGuarding;
+    const exploitedWeakness = resistance === 'weak' && !weaknessNegated;
 
     let multiplier = randomFactor;
     if (exploitedWeakness) multiplier *= 1.5;
@@ -202,6 +207,7 @@ export class CombatSystem {
       resistance,
       critical,
       exploitedWeakness,
+      weaknessNegated,
       bonusTurn: exploitedWeakness || critical,
       knockedDown,
     };
