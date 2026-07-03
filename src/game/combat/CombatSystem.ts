@@ -231,9 +231,11 @@ export class CombatSystem {
     const damage = Math.floor(baseDamage * multiplier);
     target.battleHp = Math.max(0, target.battleHp - damage);
 
-    // A target that's already down can't be knocked down again — further
-    // weakness/crit hits still deal bonus damage but don't re-trigger the down.
-    const knockedDown = (exploitedWeakness || critical) && target.battleHp > 0 && !this.isKnockedDown(target);
+    // A target that's already down can't be knocked down again, and further
+    // weakness/crit hits against it don't earn a 1 MORE turn either — both
+    // rewards are for putting someone down, not for hitting them while down.
+    const wasAlreadyDown = this.isKnockedDown(target);
+    const knockedDown = (exploitedWeakness || critical) && target.battleHp > 0 && !wasAlreadyDown;
     if (knockedDown) {
       target.battleStatus.push({ status: 'knockdown', turnsRemaining: 1 });
     }
@@ -255,7 +257,7 @@ export class CombatSystem {
       critical,
       exploitedWeakness,
       weaknessNegated,
-      bonusTurn: exploitedWeakness || critical,
+      bonusTurn: (exploitedWeakness || critical) && !wasAlreadyDown,
       knockedDown,
     };
   }

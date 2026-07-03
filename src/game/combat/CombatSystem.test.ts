@@ -69,7 +69,7 @@ describe('CombatSystem', () => {
     expect(target.battleStatus).toContainEqual({ status: 'knockdown', turnsRemaining: 1 });
   });
 
-  it('does not re-trigger a down on a target that is already knocked down', () => {
+  it('does not re-trigger a down or grant 1 MORE against a target that is already knocked down', () => {
     vi.spyOn(Math, 'random')
       .mockReturnValueOnce(0.1) // accuracy roll
       .mockReturnValueOnce(0.5) // randomFactor -> 1.0
@@ -80,9 +80,9 @@ describe('CombatSystem', () => {
 
     const result = combatSystem.performAction(attacker, target, fireballSkill);
 
-    // Still exploits the weakness (bonus damage, 1 MORE) but doesn't add a second down.
+    // Still exploits the weakness for bonus damage, but no fresh down and no 1 MORE.
     expect(result.exploitedWeakness).toBe(true);
-    expect(result.bonusTurn).toBe(true);
+    expect(result.bonusTurn).toBe(false);
     expect(result.knockedDown).toBe(false);
     expect(target.battleStatus.filter(s => s.status === 'knockdown')).toHaveLength(1);
   });
