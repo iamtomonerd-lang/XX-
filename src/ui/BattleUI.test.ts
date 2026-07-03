@@ -36,11 +36,38 @@ describe('BattleUI', () => {
     const ready = ui.getReadyCharacter();
     expect(ready?.id).toBe(hero.id);
 
+    expect(ui.isAwaitingInput()).toBe(false);
     ui.beginTurn(hero);
+    expect(ui.isAwaitingInput()).toBe(true);
+
     const vm = ui.getViewModel();
     expect(vm.mode).toBe('command');
     expect(vm.actingCharacterId).toBe(hero.id);
     expect(vm.commands.find(c => c.type === 'physical')?.enabled).toBe(true);
+  });
+
+  it('isAwaitingInput stays true through a 1 MORE bonus turn and clears once the turn truly ends', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.1) // accuracy
+      .mockReturnValueOnce(0.5) // randomFactor
+      .mockReturnValueOnce(0.9); // no crit
+
+    const hero = createCharacter({ skills: [fireballSkill] });
+    const weakEnemy = createEnemy({ fire: 'weak' }, { id: 'weak-enemy' });
+    const toughEnemy = createEnemy({}, { id: 'tough-enemy' });
+    const battleState = combatSystem.startBattle([hero], [weakEnemy, toughEnemy]);
+    const ui = new BattleUI(combatSystem, battleState);
+    ui.beginTurn(hero);
+
+    ui.selectCommand('skill');
+    ui.selectSkill(fireballSkill);
+    ui.selectTarget(weakEnemy); // exploits the weakness -> 1 MORE
+
+    expect(ui.getViewModel().mode).toBe('command');
+    expect(ui.isAwaitingInput()).toBe(true); // still hero's turn; the ATB clock must stay paused
+
+    ui.selectCommand('guard'); // ends the turn for real (no bonus)
+    expect(ui.isAwaitingInput()).toBe(false);
   });
 
   it('物理: selecting physical then a target attacks and ends the turn', () => {

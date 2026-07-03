@@ -74,6 +74,16 @@ export class BattleUI {
     private readonly battleState: BattleState
   ) {}
 
+  /**
+   * True while a character's turn is open (command menu, target/skill/item
+   * selection, or the All-Out Attack prompt). The caller should pause
+   * CombatSystem.update while this holds, otherwise enemies keep acting
+   * on the real-time ATB clock while the player is still deciding.
+   */
+  isAwaitingInput(): boolean {
+    return this.actingCharacter !== null;
+  }
+
   /** Finds a character combatant whose turn has come up and isn't already being handled. */
   getReadyCharacter(): BattleCharacter | null {
     if (this.actingCharacter) {
