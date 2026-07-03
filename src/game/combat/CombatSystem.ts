@@ -1,4 +1,30 @@
-import { BattleState, BattleCharacter, BattleEnemy, Skill, Combatant, ElementResistances, Element, Resistance } from '@/types';
+import {
+  BattleState,
+  BattleCharacter,
+  BattleEnemy,
+  Skill,
+  Combatant,
+  ElementResistances,
+  Element,
+  Resistance,
+  InventoryItem,
+  StatusType,
+} from '@/types';
+
+export interface AnalysisResult {
+  weaknesses: Element[];
+  resists: Element[];
+  blocks: Element[];
+  absorbs: Element[];
+}
+
+export interface ItemUseResult {
+  success: boolean;
+  healedHp: number;
+  healedMp: number;
+  curedStatus: StatusType[];
+  revived: boolean;
+}
 
 export interface ActionResult {
   hit: boolean;
@@ -68,14 +94,20 @@ export class CombatSystem {
     return this.TICKS_PER_TURN * (1 - agilityBonus);
   }
 
-  private executeCharacterTurn(_character: BattleCharacter, _combatant: Combatant, _battleState: BattleState): void {
+  private executeCharacterTurn(character: BattleCharacter, _combatant: Combatant, _battleState: BattleState): void {
+    // A guard only lasts until the guarder's own next turn comes up.
+    this.beginTurn(character);
+
     // Player-controlled turn: the UI layer selects the action and calls
-    // performAction directly, then advances combatant.nextTurnIn based on
-    // the returned ActionResult (see applyBonusTurn). Nothing to do here
-    // while waiting for input.
+    // performAction/guard/useItem/etc. directly, then advances
+    // combatant.nextTurnIn (see applyBonusTurn). Nothing to do here while
+    // waiting for input.
   }
 
   private executeEnemyTurn(enemy: BattleEnemy, combatant: Combatant, battleState: BattleState): void {
+    // A guard only lasts until the guarder's own next turn comes up.
+    this.beginTurn(enemy);
+
     // Simple AI: pick a random skill and target
     if (enemy.skills.length === 0) {
       combatant.nextTurnIn = this.calculateTurnDelay(combatant.agility);
@@ -144,6 +176,7 @@ export class CombatSystem {
     if (exploitedWeakness) multiplier *= 1.5;
     if (resistance === 'resist') multiplier *= 0.5;
     if (critical) multiplier *= 1.5;
+    if (target.isGuarding) multiplier *= 0.5;
 
     const damage = Math.floor(baseDamage * multiplier);
     target.battleHp = Math.max(0, target.battleHp - damage);
@@ -177,6 +210,131 @@ export class CombatSystem {
   /** @deprecated Use performAction, which returns weakness/critical results. */
   applySkill(attacker: BattleCharacter | BattleEnemy, target: BattleCharacter | BattleEnemy, skill: Skill): ActionResult {
     return this.performAction(attacker, target, skill);
+  }
+
+  /** Clears a combatant's guard; called when it becomes their turn to act again. */
+  private beginTurn(combatant: BattleCharacter | BattleEnemy): void {
+    combatant.isGuarding = false;
+  }
+
+  /** 物理 — a free (no MP cost) attack using the attacker's raw strength. */
+  performBasicAttack(attacker: BattleCharacter | BattleEnemy, target: BattleCharacter | BattleEnemy): ActionResult {
+    const basicAttack: Skill = {
+      id: 'basic-attack',
+      name: '攻撃',
+      type: 'physical',
+      element: 'physical',
+      power: 100,
+      accuracy: 0.95,
+      costMp: 0,
+      targetType: 'single',
+    };
+    return this.performAction(attacker, target, basicAttack);
+  }
+
+  /** ガード — halves damage taken until the start of this combatant's next turn. */
+  guard(combatant: BattleCharacter | BattleEnemy): void {
+    combatant.isGuarding = true;
+  }
+
+  /** アナライズ — reveals an enemy's elemental weaknesses/resistances. */
+  analyze(target: BattleEnemy): AnalysisResult {
+    target.isAnalyzed = true;
+
+    const result: AnalysisResult = { weaknesses: [], resists: [], blocks: [], absorbs: [] };
+    for (const element of Object.keys(target.resistances) as Element[]) {
+      switch (target.resistances[element]) {
+        case 'weak':
+          result.weaknesses.push(element);
+          break;
+        case 'resist':
+          result.resists.push(element);
+          break;
+        case 'block':
+          result.blocks.push(element);
+          break;
+        case 'absorb':
+          result.absorbs.push(element);
+          break;
+      }
+    }
+    return result;
+  }
+
+  /** ペルソナ — switches the character's active persona. Returns false if the index is invalid. */
+  switchPersona(character: BattleCharacter, personaIndex: number): boolean {
+    if (personaIndex < 0 || personaIndex >= character.personas.length) {
+      return false;
+    }
+    character.currentPersona = personaIndex;
+    return true;
+  }
+
+  /** アイテム — consumes an inventory item on a target (heal HP/MP, cure status, or revive). */
+  useItem(inventoryItem: InventoryItem, target: BattleCharacter | BattleEnemy): ItemUseResult {
+    const effect = inventoryItem.item.battleEffect;
+    const failure: ItemUseResult = { success: false, healedHp: 0, healedMp: 0, curedStatus: [], revived: false };
+
+    if (!effect || inventoryItem.quantity <= 0) {
+      return failure;
+    }
+
+    let revived = false;
+    if (target.battleHp <= 0) {
+      if (!effect.revive) {
+        return failure;
+      }
+      target.battleHp = Math.max(1, Math.floor(target.maxHp * 0.5));
+      revived = true;
+    }
+
+    const healedHp = Math.min(
+      target.maxHp - target.battleHp,
+      (effect.healHp ?? 0) + Math.floor(target.maxHp * (effect.healHpPercent ?? 0))
+    );
+    target.battleHp += healedHp;
+
+    const healedMp = Math.min(
+      target.maxMp - target.battleMp,
+      (effect.healMp ?? 0) + Math.floor(target.maxMp * (effect.healMpPercent ?? 0))
+    );
+    target.battleMp += healedMp;
+
+    const curedStatus: StatusType[] = [];
+    if (effect.cureStatus?.length) {
+      target.battleStatus = target.battleStatus.filter(status => {
+        if (effect.cureStatus!.includes(status.status)) {
+          curedStatus.push(status.status);
+          return false;
+        }
+        return true;
+      });
+    }
+
+    inventoryItem.quantity -= 1;
+
+    return { success: true, healedHp, healedMp, curedStatus, revived };
+  }
+
+  /** 逃走 — attempts to flee; odds favor the side with higher average agility. */
+  attemptEscape(battleState: BattleState): boolean {
+    const aliveAllies = battleState.allies.filter(a => a.battleHp > 0);
+    const aliveEnemies = battleState.enemies.filter(e => e.battleHp > 0);
+
+    if (aliveEnemies.length === 0) {
+      battleState.status = 'escaped';
+      return true;
+    }
+
+    const avgAllyAgility = aliveAllies.reduce((sum, a) => sum + a.stats.agility, 0) / Math.max(1, aliveAllies.length);
+    const avgEnemyAgility = aliveEnemies.reduce((sum, e) => sum + e.stats.agility, 0) / Math.max(1, aliveEnemies.length);
+    const chance = Math.min(0.95, Math.max(0.1, 0.5 + (avgAllyAgility - avgEnemyAgility) / 100));
+
+    const success = Math.random() < chance;
+    if (success) {
+      battleState.status = 'escaped';
+    }
+    return success;
   }
 
   /**

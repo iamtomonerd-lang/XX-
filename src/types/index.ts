@@ -96,6 +96,16 @@ export interface Item {
   description: string;
   stats?: Partial<Stats>;
   resistances?: ElementResistances;
+  battleEffect?: ItemBattleEffect;
+}
+
+export interface ItemBattleEffect {
+  healHp?: number;
+  healHpPercent?: number; // 0-1, fraction of target's maxHp
+  healMp?: number;
+  healMpPercent?: number; // 0-1, fraction of target's maxMp
+  cureStatus?: StatusType[];
+  revive?: boolean;
 }
 
 export type ItemType = 'weapon' | 'armor' | 'accessory' | 'consumable' | 'material';
@@ -139,6 +149,7 @@ export interface BattleCharacter extends Character {
   battleHp: number;
   battleMp: number;
   battleStatus: BattleStatus[];
+  isGuarding?: boolean;
 }
 
 export interface BattleEnemy extends Enemy {
@@ -146,6 +157,8 @@ export interface BattleEnemy extends Enemy {
   battleMp: number;
   battleStatus: BattleStatus[];
   aiPattern?: string;
+  isGuarding?: boolean;
+  isAnalyzed?: boolean;
 }
 
 export interface BattleStatus {
