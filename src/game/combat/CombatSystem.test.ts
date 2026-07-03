@@ -369,4 +369,145 @@ describe('CombatSystem', () => {
     expect(escaped).toBe(false);
     expect(battleState.status).toBe('active');
   });
+
+  it('startBattle builds an ATB queue ordered by agility and resets per-battle state', () => {
+    const fastAlly = createCharacter({
+      id: 'fast',
+      stats: { strength: 10, magic: 10, endurance: 10, agility: 90, luck: 10 },
+      isGuarding: true,
+    });
+    const slowEnemy = createEnemy(
+      {},
+      {
+        id: 'slow',
+        stats: { strength: 10, magic: 10, endurance: 10, agility: 5, luck: 10 },
+        battleStatus: [{ status: 'knockdown', turnsRemaining: 1 }],
+        isAnalyzed: true,
+      }
+    );
+
+    const battleState = combatSystem.startBattle([fastAlly], [slowEnemy]);
+
+    expect(battleState.status).toBe('active');
+    expect(battleState.combatants).toHaveLength(2);
+    expect(battleState.combatants[0].id).toBe('fast'); // higher agility -> shorter delay -> acts first
+    expect(fastAlly.isGuarding).toBe(false);
+    expect(slowEnemy.isAnalyzed).toBe(false);
+    expect(slowEnemy.battleStatus).toHaveLength(0);
+  });
+
+  it('checkBattleEnd fires automatically once an enemy turn finishes off the party', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.1) // accuracy roll
+      .mockReturnValueOnce(0.5) // randomFactor
+      .mockReturnValueOnce(0.9); // crit roll -> no crit
+
+    const lethalSkill: Skill = {
+      id: 'smash',
+      name: 'Smash',
+      type: 'physical',
+      element: 'physical',
+      power: 1000,
+      accuracy: 1,
+      costMp: 0,
+      targetType: 'single',
+    };
+    const ally = createCharacter({ battleHp: 1 });
+    const enemy = createEnemy({}, { skills: [lethalSkill] });
+    const combatant: Combatant = { id: enemy.id, type: 'enemy', agility: enemy.stats.agility, nextTurnIn: 0 };
+    const battleState = { allies: [ally], enemies: [enemy], turn: 1, currentTurnIndex: 0, combatants: [combatant], status: 'active' as const };
+
+    combatSystem.update(battleState, 0);
+
+    expect(ally.battleHp).toBe(0);
+    expect(battleState.status).toBe('defeat');
+  });
+
+  it('canAllOutAttack is true only once every alive enemy is knocked down', () => {
+    const downedEnemy = createEnemy({}, { id: 'e1', battleStatus: [{ status: 'knockdown', turnsRemaining: 1 }] });
+    const standingEnemy = createEnemy({}, { id: 'e2' });
+    const battleState = {
+      allies: [createCharacter()],
+      enemies: [downedEnemy, standingEnemy],
+      turn: 1,
+      currentTurnIndex: 0,
+      combatants: [],
+      status: 'active' as const,
+    };
+
+    expect(combatSystem.canAllOutAttack(battleState)).toBe(false);
+
+    standingEnemy.battleStatus = [{ status: 'knockdown', turnsRemaining: 1 }];
+    expect(combatSystem.canAllOutAttack(battleState)).toBe(true);
+  });
+
+  it('総攻撃: is not attempted unless every alive enemy is down', () => {
+    const battleState = {
+      allies: [createCharacter()],
+      enemies: [createEnemy({})],
+      turn: 1,
+      currentTurnIndex: 0,
+      combatants: [],
+      status: 'active' as const,
+    };
+
+    const result = combatSystem.performAllOutAttack(battleState);
+
+    expect(result.attempted).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.damageDealt).toEqual({});
+  });
+
+  it('総攻撃: deals damage to every downed enemy and clears their knockdown', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.5) // success roll: 0.5 >= missChance(0.10) -> success
+      .mockReturnValueOnce(0.5); // randomFactor -> 0.9 + 0.5*0.2 = 1.0
+
+    const ally = createCharacter({ stats: { strength: 20, magic: 10, endurance: 10, agility: 10, luck: 10 } });
+    const enemyA = createEnemy({}, { id: 'e1', battleStatus: [{ status: 'knockdown', turnsRemaining: 1 }] });
+    const enemyB = createEnemy({}, { id: 'e2', battleStatus: [{ status: 'knockdown', turnsRemaining: 1 }] });
+    const battleState = {
+      allies: [ally],
+      enemies: [enemyA, enemyB],
+      turn: 1,
+      currentTurnIndex: 0,
+      combatants: [],
+      status: 'active' as const,
+    };
+
+    const result = combatSystem.performAllOutAttack(battleState);
+
+    // totalStrength(20) * 1.5 * randomFactor(1.0) - endurance(10) = 20
+    expect(result.attempted).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.damageDealt.e1).toBe(20);
+    expect(result.damageDealt.e2).toBe(20);
+    expect(enemyA.battleHp).toBe(80);
+    expect(enemyB.battleHp).toBe(80);
+    expect(enemyA.battleStatus).toHaveLength(0);
+    expect(enemyB.battleStatus).toHaveLength(0);
+  });
+
+  it('総攻撃: can whiff, dealing no damage but still spending the down opportunity', () => {
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.0); // 0.0 < missChance -> failure
+
+    const ally = createCharacter();
+    const enemy = createEnemy({}, { battleStatus: [{ status: 'knockdown', turnsRemaining: 1 }] });
+    const battleState = {
+      allies: [ally],
+      enemies: [enemy],
+      turn: 1,
+      currentTurnIndex: 0,
+      combatants: [],
+      status: 'active' as const,
+    };
+
+    const result = combatSystem.performAllOutAttack(battleState);
+
+    expect(result.attempted).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.damageDealt).toEqual({});
+    expect(enemy.battleHp).toBe(100);
+    expect(enemy.battleStatus).toHaveLength(0);
+  });
 });

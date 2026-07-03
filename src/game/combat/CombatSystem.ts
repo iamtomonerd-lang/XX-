@@ -26,6 +26,14 @@ export interface ItemUseResult {
   revived: boolean;
 }
 
+export interface AllOutAttackResult {
+  /** False if the party wasn't eligible (not every alive enemy was knocked down). */
+  attempted: boolean;
+  success: boolean;
+  /** Damage dealt per enemy id; empty when the attack missed or wasn't attempted. */
+  damageDealt: Record<string, number>;
+}
+
 export interface ActionResult {
   hit: boolean;
   damage: number;
@@ -55,6 +63,38 @@ const MISS_RESULT: ActionResult = {
 export class CombatSystem {
   private readonly TICKS_PER_TURN = 100;
 
+  /**
+   * Initializes a fresh battle: builds the ATB turn queue from each
+   * combatant's agility (higher agility reaches its turn sooner) and resets
+   * per-battle state (guard/knockdown/analysis) in case these units carry
+   * state over from a previous encounter.
+   */
+  startBattle(allies: BattleCharacter[], enemies: BattleEnemy[]): BattleState {
+    for (const ally of allies) {
+      ally.isGuarding = false;
+      ally.battleStatus = ally.battleStatus.filter(s => s.status !== 'knockdown');
+    }
+    for (const enemy of enemies) {
+      enemy.isGuarding = false;
+      enemy.isAnalyzed = false;
+      enemy.battleStatus = enemy.battleStatus.filter(s => s.status !== 'knockdown');
+    }
+
+    const combatants: Combatant[] = [
+      ...allies.map((a): Combatant => ({ id: a.id, type: 'character', agility: a.stats.agility, nextTurnIn: this.calculateTurnDelay(a.stats.agility) })),
+      ...enemies.map((e): Combatant => ({ id: e.id, type: 'enemy', agility: e.stats.agility, nextTurnIn: this.calculateTurnDelay(e.stats.agility) })),
+    ].sort((a, b) => a.nextTurnIn - b.nextTurnIn);
+
+    return {
+      allies,
+      enemies,
+      turn: 1,
+      currentTurnIndex: 0,
+      combatants,
+      status: 'active',
+    };
+  }
+
   update(battleState: BattleState, deltaTime: number): void {
     if (battleState.status !== 'active') {
       return;
@@ -74,6 +114,10 @@ export class CombatSystem {
     const readyCombatants = battleState.combatants.filter(c => c.nextTurnIn <= 0);
 
     for (const combatant of readyCombatants) {
+      if (battleState.status !== 'active') {
+        return;
+      }
+
       if (combatant.type === 'character') {
         const character = battleState.allies.find(a => a.id === combatant.id);
         if (character && character.battleHp > 0) {
@@ -85,6 +129,7 @@ export class CombatSystem {
         const enemy = battleState.enemies.find(e => e.id === combatant.id);
         if (enemy && enemy.battleHp > 0) {
           this.executeEnemyTurn(enemy, combatant, battleState);
+          this.checkBattleEnd(battleState);
         } else {
           combatant.nextTurnIn = this.calculateTurnDelay(combatant.agility);
         }
@@ -341,6 +386,57 @@ export class CombatSystem {
       battleState.status = 'escaped';
     }
     return success;
+  }
+
+  /** 総攻撃 — true once every alive enemy has been knocked down. */
+  canAllOutAttack(battleState: BattleState): boolean {
+    const aliveEnemies = battleState.enemies.filter(e => e.battleHp > 0);
+    return aliveEnemies.length > 0 && aliveEnemies.every(e => this.isKnockedDown(e));
+  }
+
+  /**
+   * 総攻撃 — the whole party piles on every downed enemy at once. Higher
+   * average party luck lowers the (small) chance the attack whiffs
+   * entirely. Either way the down opportunity is spent: knockdown status
+   * is cleared from all enemies once this resolves.
+   */
+  performAllOutAttack(battleState: BattleState): AllOutAttackResult {
+    if (!this.canAllOutAttack(battleState)) {
+      return { attempted: false, success: false, damageDealt: {} };
+    }
+
+    const aliveAllies = battleState.allies.filter(a => a.battleHp > 0);
+    const aliveEnemies = battleState.enemies.filter(e => e.battleHp > 0);
+
+    const avgLuck = aliveAllies.reduce((sum, a) => sum + a.stats.luck, 0) / Math.max(1, aliveAllies.length);
+    const missChance = Math.min(0.15, Math.max(0.02, 0.15 - avgLuck * 0.005));
+    const success = Math.random() >= missChance;
+
+    for (const enemy of aliveEnemies) {
+      enemy.battleStatus = enemy.battleStatus.filter(s => s.status !== 'knockdown');
+    }
+
+    const damageDealt: Record<string, number> = {};
+    if (!success) {
+      return { attempted: true, success: false, damageDealt };
+    }
+
+    const totalStrength = aliveAllies.reduce((sum, a) => sum + a.stats.strength, 0);
+    const randomFactor = 0.9 + Math.random() * 0.2; // 90-110%
+
+    for (const enemy of aliveEnemies) {
+      const damage = Math.max(1, Math.floor(totalStrength * 1.5 * randomFactor - enemy.stats.endurance));
+      enemy.battleHp = Math.max(0, enemy.battleHp - damage);
+      damageDealt[enemy.id] = damage;
+    }
+
+    this.checkBattleEnd(battleState);
+
+    return { attempted: true, success: true, damageDealt };
+  }
+
+  private isKnockedDown(combatant: BattleCharacter | BattleEnemy): boolean {
+    return combatant.battleStatus.some(s => s.status === 'knockdown');
   }
 
   /**
