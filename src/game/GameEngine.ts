@@ -1,4 +1,4 @@
-import { GameState, GameMode, Character } from '@/types';
+import { GameState, GameMode } from '@/types';
 import { GameStateManager } from './state/GameStateManager';
 import { CombatSystem } from './combat/CombatSystem';
 
@@ -67,9 +67,7 @@ export class GameEngine {
   }
 
   private render(): void {
-    // Emit current state for UI rendering
-    const state = this.stateManager.getState();
-    // UI layer will subscribe to state changes and render accordingly
+    // UI layer subscribes to GameStateManager directly and renders on state changes.
   }
 
   public getState(): GameState {

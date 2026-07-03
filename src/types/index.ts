@@ -75,11 +75,11 @@ export interface StatusEffect {
   potency: number;
 }
 
-export type StatusType = 'poison' | 'charm' | 'sleep' | 'stun' | 'bind' | 'curse';
+export type StatusType = 'poison' | 'charm' | 'sleep' | 'stun' | 'bind' | 'curse' | 'knockdown';
 
-export interface ElementResistances {
+export type ElementResistances = {
   [element in Element]?: Resistance;
-}
+};
 
 export type Resistance = 'weak' | 'normal' | 'resist' | 'block' | 'absorb';
 
