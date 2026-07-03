@@ -231,7 +231,9 @@ export class CombatSystem {
     const damage = Math.floor(baseDamage * multiplier);
     target.battleHp = Math.max(0, target.battleHp - damage);
 
-    const knockedDown = (exploitedWeakness || critical) && target.battleHp > 0;
+    // A target that's already down can't be knocked down again — further
+    // weakness/crit hits still deal bonus damage but don't re-trigger the down.
+    const knockedDown = (exploitedWeakness || critical) && target.battleHp > 0 && !this.isKnockedDown(target);
     if (knockedDown) {
       target.battleStatus.push({ status: 'knockdown', turnsRemaining: 1 });
     }

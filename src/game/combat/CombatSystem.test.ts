@@ -69,6 +69,24 @@ describe('CombatSystem', () => {
     expect(target.battleStatus).toContainEqual({ status: 'knockdown', turnsRemaining: 1 });
   });
 
+  it('does not re-trigger a down on a target that is already knocked down', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.1) // accuracy roll
+      .mockReturnValueOnce(0.5) // randomFactor -> 1.0
+      .mockReturnValueOnce(0.9); // no crit
+
+    const attacker = createEnemy({});
+    const target = createEnemy({ fire: 'weak' }, { battleStatus: [{ status: 'knockdown', turnsRemaining: 1 }] });
+
+    const result = combatSystem.performAction(attacker, target, fireballSkill);
+
+    // Still exploits the weakness (bonus damage, 1 MORE) but doesn't add a second down.
+    expect(result.exploitedWeakness).toBe(true);
+    expect(result.bonusTurn).toBe(true);
+    expect(result.knockedDown).toBe(false);
+    expect(target.battleStatus.filter(s => s.status === 'knockdown')).toHaveLength(1);
+  });
+
   it('blocks damage entirely and grants no bonus turn when target blocks the element', () => {
     vi.spyOn(Math, 'random').mockReturnValueOnce(0.1); // accuracy roll only
 

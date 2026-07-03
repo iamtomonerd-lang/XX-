@@ -270,11 +270,13 @@ export class BattleUI {
       return;
     }
     if (result.exploitedWeakness) {
-      this.log.push({ message: `弱点をついた！ ${target.name}に${result.damage}のダメージ、ダウン！`, turn: this.battleState.turn });
+      const suffix = result.knockedDown ? '、ダウン！' : '';
+      this.log.push({ message: `弱点をついた！ ${target.name}に${result.damage}のダメージ${suffix}`, turn: this.battleState.turn });
       return;
     }
     if (result.critical) {
-      this.log.push({ message: `会心の一撃！ ${target.name}に${result.damage}のダメージ、ダウン！`, turn: this.battleState.turn });
+      const suffix = result.knockedDown ? '、ダウン！' : '';
+      this.log.push({ message: `会心の一撃！ ${target.name}に${result.damage}のダメージ${suffix}`, turn: this.battleState.turn });
       return;
     }
     this.log.push({ message: `${target.name}に${result.damage}のダメージ！`, turn: this.battleState.turn });
